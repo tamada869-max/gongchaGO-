@@ -1,0 +1,1831 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Gong cha 新店出店 タスク管理 [Firebase版]</title>
+<!-- Firebase SDK -->
+<script type="module">
+  import { initializeApp } from 'https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js';
+  import { getDatabase, ref, set, onValue, push, remove, update }
+    from 'https://www.gstatic.com/firebasejs/10.12.0/firebase-database.js';
+  window._fbReady = { initializeApp, getDatabase, ref, set, onValue, push, remove, update };
+</script>
+<style>
+  :root {
+    --primary: #1a6b3c;
+    --primary-light: #2d9e5f;
+    --primary-dark: #0f4526;
+    --accent: #f5a623;
+    --accent2: #e8f5ee;
+    --bg: #f4f6f8;
+    --card: #ffffff;
+    --text: #1a1a2e;
+    --text-muted: #6b7280;
+    --border: #e2e8f0;
+    --todo: #6b7280;
+    --inprogress: #3b82f6;
+    --done: #10b981;
+    --overdue: #ef4444;
+    --shadow: 0 2px 12px rgba(0,0,0,0.08);
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: 'Segoe UI', 'Hiragino Sans', 'Yu Gothic', sans-serif; background: var(--bg); color: var(--text); min-height: 100vh; }
+
+  /* ===== HEADER ===== */
+  header {
+    background: linear-gradient(135deg, var(--primary-dark) 0%, var(--primary) 100%);
+    color: white; padding: 0 24px;
+    display: flex; align-items: center; justify-content: space-between;
+    height: 60px; position: sticky; top: 0; z-index: 100;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.2);
+  }
+  .header-left { display: flex; align-items: center; gap: 12px; }
+  .logo { font-size: 22px; font-weight: 800; letter-spacing: 1px; }
+  .logo span { color: var(--accent); }
+  .header-subtitle { font-size: 12px; opacity: 0.8; }
+  .header-right { display: flex; align-items: center; gap: 12px; }
+  .store-badge {
+    background: rgba(255,255,255,0.15); border: 1px solid rgba(255,255,255,0.3);
+    border-radius: 20px; padding: 4px 14px; font-size: 13px; font-weight: 600;
+    cursor: pointer; transition: background 0.2s;
+  }
+  .store-badge:hover { background: rgba(255,255,255,0.25); }
+
+  /* GO日入力エリア */
+  .go-date-area {
+    display: flex; align-items: center; gap: 8px;
+    background: rgba(255,255,255,0.12); border: 1px solid rgba(255,255,255,0.25);
+    border-radius: 20px; padding: 4px 14px;
+  }
+  .go-date-label { font-size: 11px; opacity: 0.8; white-space: nowrap; }
+  .go-date-input {
+    background: transparent; border: none; color: white; font-size: 13px;
+    font-weight: 700; outline: none; cursor: pointer; width: 110px;
+    color-scheme: dark;
+  }
+  .go-date-input::-webkit-calendar-picker-indicator { filter: invert(1); opacity: 0.7; cursor: pointer; }
+  .go-recalc-btn {
+    background: var(--accent); color: #333; border: none; border-radius: 12px;
+    padding: 3px 10px; font-size: 11px; font-weight: 800; cursor: pointer;
+    transition: opacity 0.2s; white-space: nowrap;
+  }
+  .go-recalc-btn:hover { opacity: 0.85; }
+
+  /* 逆算プレビューモーダル */
+  .recalc-preview { max-height: 320px; overflow-y: auto; margin: 12px 0; }
+  .recalc-row {
+    display: flex; align-items: center; gap: 8px; padding: 7px 0;
+    border-bottom: 1px solid var(--border); font-size: 12px;
+  }
+  .recalc-name { flex: 1; font-weight: 600; }
+  .recalc-old { color: var(--text-muted); text-decoration: line-through; white-space: nowrap; }
+  .recalc-arrow { color: var(--primary); font-weight: 700; }
+  .recalc-new { color: var(--primary); font-weight: 700; white-space: nowrap; }
+
+  /* ===== TABS ===== */
+  .tabs {
+    background: white; border-bottom: 2px solid var(--border);
+    display: flex; padding: 0 24px; gap: 4px; overflow-x: auto;
+  }
+  .tab {
+    padding: 14px 20px; font-size: 14px; font-weight: 600; cursor: pointer;
+    border-bottom: 3px solid transparent; color: var(--text-muted);
+    transition: all 0.2s; white-space: nowrap; display: flex; align-items: center; gap: 6px;
+  }
+  .tab:hover { color: var(--primary); }
+  .tab.active { color: var(--primary); border-bottom-color: var(--primary); }
+  .tab-icon { font-size: 16px; }
+
+  /* ===== MAIN ===== */
+  main { padding: 20px 24px; max-width: 1400px; margin: 0 auto; }
+
+  /* ===== DASHBOARD ===== */
+  .stats-grid {
+    display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+    gap: 16px; margin-bottom: 24px;
+  }
+  .stat-card {
+    background: var(--card); border-radius: 12px; padding: 20px;
+    box-shadow: var(--shadow); border-left: 4px solid transparent;
+    transition: transform 0.2s;
+  }
+  .stat-card:hover { transform: translateY(-2px); }
+  .stat-card.total { border-left-color: var(--primary); }
+  .stat-card.done { border-left-color: var(--done); }
+  .stat-card.inprogress { border-left-color: var(--inprogress); }
+  .stat-card.todo { border-left-color: var(--todo); }
+  .stat-card.overdue { border-left-color: var(--overdue); }
+  .stat-label { font-size: 12px; color: var(--text-muted); margin-bottom: 8px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px; }
+  .stat-value { font-size: 32px; font-weight: 800; }
+  .stat-card.total .stat-value { color: var(--primary); }
+  .stat-card.done .stat-value { color: var(--done); }
+  .stat-card.inprogress .stat-value { color: var(--inprogress); }
+  .stat-card.todo .stat-value { color: var(--todo); }
+  .stat-card.overdue .stat-value { color: var(--overdue); }
+
+  /* Progress bar */
+  .progress-section { background: var(--card); border-radius: 12px; padding: 20px; box-shadow: var(--shadow); margin-bottom: 24px; }
+  .progress-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; }
+  .progress-title { font-size: 15px; font-weight: 700; }
+  .progress-pct { font-size: 24px; font-weight: 800; color: var(--primary); }
+  .progress-bar-bg { background: var(--border); border-radius: 99px; height: 12px; overflow: hidden; }
+  .progress-bar-fill { background: linear-gradient(90deg, var(--primary), var(--primary-light)); height: 100%; border-radius: 99px; transition: width 0.6s ease; }
+  .progress-phases { display: flex; gap: 16px; margin-top: 16px; flex-wrap: wrap; }
+  .phase-chip {
+    display: flex; align-items: center; gap: 6px; font-size: 12px;
+    background: var(--bg); border-radius: 8px; padding: 6px 12px;
+  }
+  .phase-dot { width: 8px; height: 8px; border-radius: 50%; }
+
+  /* ===== FILTERS ===== */
+  .filter-bar {
+    background: var(--card); border-radius: 12px; padding: 16px 20px;
+    box-shadow: var(--shadow); margin-bottom: 20px;
+    display: flex; gap: 12px; flex-wrap: wrap; align-items: center;
+  }
+  .filter-bar input, .filter-bar select {
+    border: 1.5px solid var(--border); border-radius: 8px; padding: 8px 12px;
+    font-size: 13px; background: var(--bg); color: var(--text);
+    outline: none; transition: border-color 0.2s;
+  }
+  .filter-bar input:focus, .filter-bar select:focus { border-color: var(--primary); }
+  .filter-bar input { flex: 1; min-width: 200px; }
+  .btn {
+    padding: 8px 16px; border-radius: 8px; border: none; cursor: pointer;
+    font-size: 13px; font-weight: 600; transition: all 0.2s;
+  }
+  .btn-primary { background: var(--primary); color: white; }
+  .btn-primary:hover { background: var(--primary-dark); }
+  .btn-outline { background: white; color: var(--primary); border: 1.5px solid var(--primary); }
+  .btn-outline:hover { background: var(--accent2); }
+  .btn-sm { padding: 5px 10px; font-size: 12px; }
+
+  /* ===== TASK LIST ===== */
+  .phase-section { margin-bottom: 24px; }
+  .phase-header {
+    display: flex; align-items: center; gap: 10px; margin-bottom: 12px;
+    cursor: pointer; user-select: none;
+  }
+  .phase-title { font-size: 16px; font-weight: 800; color: var(--primary-dark); }
+  .phase-count {
+    background: var(--primary); color: white; border-radius: 99px;
+    padding: 2px 10px; font-size: 12px; font-weight: 700;
+  }
+  .phase-toggle { margin-left: auto; color: var(--text-muted); font-size: 18px; transition: transform 0.2s; }
+  .phase-toggle.collapsed { transform: rotate(-90deg); }
+
+  .task-table { width: 100%; border-collapse: collapse; background: var(--card); border-radius: 12px; overflow: hidden; box-shadow: var(--shadow); }
+  .task-table th {
+    background: var(--primary-dark); color: white; padding: 12px 16px;
+    font-size: 12px; font-weight: 700; text-align: left; text-transform: uppercase; letter-spacing: 0.5px;
+  }
+  .task-table td { padding: 12px 16px; border-bottom: 1px solid var(--border); font-size: 13px; vertical-align: middle; }
+  .task-table tr:last-child td { border-bottom: none; }
+  .task-table tr:hover td { background: var(--accent2); }
+
+  .status-badge {
+    display: inline-flex; align-items: center; gap: 4px;
+    padding: 4px 10px; border-radius: 99px; font-size: 11px; font-weight: 700;
+    white-space: nowrap;
+  }
+  .status-todo { background: #f1f5f9; color: var(--todo); }
+  .status-inprogress { background: #eff6ff; color: var(--inprogress); }
+  .status-done { background: #f0fdf4; color: var(--done); }
+  .status-overdue { background: #fef2f2; color: var(--overdue); }
+
+  .assignee-badge {
+    background: var(--accent2); color: var(--primary-dark);
+    border-radius: 6px; padding: 3px 8px; font-size: 11px; font-weight: 700;
+  }
+
+  .task-name { font-weight: 600; }
+  .task-desc { font-size: 11px; color: var(--text-muted); margin-top: 2px; }
+  .date-cell { font-size: 12px; color: var(--text-muted); white-space: nowrap; }
+  .date-overdue { color: var(--overdue); font-weight: 700; }
+
+  .action-btn {
+    background: none; border: 1px solid var(--border); border-radius: 6px;
+    padding: 4px 8px; cursor: pointer; font-size: 11px; color: var(--text-muted);
+    transition: all 0.2s; margin-right: 4px;
+  }
+  .action-btn:hover { border-color: var(--primary); color: var(--primary); background: var(--accent2); }
+
+  /* ===== GANTT ===== */
+  .gantt-container { background: var(--card); border-radius: 12px; box-shadow: var(--shadow); overflow: hidden; }
+  .gantt-scroll { overflow-x: auto; }
+  .gantt-table { border-collapse: collapse; min-width: 100%; }
+  .gantt-table th { background: var(--primary-dark); color: white; padding: 8px 6px; font-size: 11px; text-align: center; white-space: nowrap; min-width: 28px; }
+  .gantt-table th.task-col { min-width: 200px; text-align: left; padding-left: 16px; }
+  .gantt-table th.month-header { background: var(--primary); font-size: 12px; font-weight: 800; }
+  .gantt-table td { padding: 8px 6px; border-bottom: 1px solid var(--border); font-size: 12px; vertical-align: middle; }
+  .gantt-table td.task-col { padding-left: 16px; min-width: 200px; font-weight: 600;
+    position: sticky; left: 0; background: white; z-index: 2;
+    border-right: 2px solid var(--border); box-shadow: 2px 0 6px rgba(0,0,0,0.06); }
+  .gantt-table th.task-col { position: sticky; left: 0; z-index: 3;
+    border-right: 2px solid rgba(255,255,255,0.2); box-shadow: 2px 0 6px rgba(0,0,0,0.15); }
+  .gantt-table th.month-header:first-child { position: sticky; left: 0; z-index: 3; }
+  .gantt-table tr:hover td.task-col { background: var(--accent2); }
+  .gantt-table tr:hover td { background: var(--accent2); }
+  .gantt-bar { height: 18px; border-radius: 4px; background: linear-gradient(90deg, var(--primary), var(--primary-light)); }
+  .gantt-bar.done { background: linear-gradient(90deg, var(--done), #34d399); }
+  .gantt-bar.inprogress { background: linear-gradient(90deg, var(--inprogress), #60a5fa); }
+  .gantt-bar.overdue { background: linear-gradient(90deg, var(--overdue), #f87171); }
+  .gantt-today { background: rgba(245,166,35,0.25) !important; }
+  .gantt-weekend { background: #fafafa; }
+
+  /* ===== MODAL ===== */
+  .modal-overlay {
+    display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.5);
+    z-index: 200; align-items: center; justify-content: center;
+  }
+  .modal-overlay.open { display: flex; }
+  .modal {
+    background: white; border-radius: 16px; padding: 28px; width: 90%; max-width: 560px;
+    box-shadow: 0 20px 60px rgba(0,0,0,0.2); max-height: 90vh; overflow-y: auto;
+  }
+  .modal-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; }
+  .modal-title { font-size: 18px; font-weight: 800; color: var(--primary-dark); }
+  .modal-close { background: none; border: none; font-size: 24px; cursor: pointer; color: var(--text-muted); }
+  .form-group { margin-bottom: 16px; }
+  .form-label { font-size: 12px; font-weight: 700; color: var(--text-muted); margin-bottom: 6px; display: block; text-transform: uppercase; letter-spacing: 0.5px; }
+  .form-input, .form-select, .form-textarea {
+    width: 100%; border: 1.5px solid var(--border); border-radius: 8px;
+    padding: 10px 12px; font-size: 14px; outline: none; transition: border-color 0.2s;
+    font-family: inherit;
+  }
+  .form-input:focus, .form-select:focus, .form-textarea:focus { border-color: var(--primary); }
+  .form-textarea { resize: vertical; min-height: 80px; }
+  .form-row { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+  .modal-footer { display: flex; gap: 10px; justify-content: flex-end; margin-top: 20px; }
+
+  /* ===== COMMENT ===== */
+  .comment-section { margin-top: 16px; border-top: 1px solid var(--border); padding-top: 16px; }
+  .comment-item { background: var(--bg); border-radius: 8px; padding: 10px 12px; margin-bottom: 8px; }
+  .comment-meta { font-size: 11px; color: var(--text-muted); margin-bottom: 4px; }
+  .comment-text { font-size: 13px; }
+  .comment-input-row { display: flex; gap: 8px; margin-top: 10px; }
+  .comment-input-row input { flex: 1; border: 1.5px solid var(--border); border-radius: 8px; padding: 8px 12px; font-size: 13px; outline: none; }
+  .comment-input-row input:focus { border-color: var(--primary); }
+
+  /* ===== STORE MODAL ===== */
+  .store-list { display: flex; flex-direction: column; gap: 8px; margin-bottom: 16px; }
+  .store-item {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 12px 16px; border: 1.5px solid var(--border); border-radius: 10px;
+    cursor: pointer; transition: all 0.2s;
+  }
+  .store-item:hover { border-color: var(--primary); background: var(--accent2); }
+  .store-item.active { border-color: var(--primary); background: var(--accent2); }
+  .store-item-name { font-weight: 700; font-size: 14px; }
+  .store-item-date { font-size: 12px; color: var(--text-muted); }
+
+  /* ===== RESPONSIVE ===== */
+  @media (max-width: 768px) {
+    main { padding: 12px 16px; }
+    .stats-grid { grid-template-columns: repeat(2, 1fr); }
+    .filter-bar { flex-direction: column; }
+    .filter-bar input { min-width: unset; }
+    .form-row { grid-template-columns: 1fr; }
+    header { padding: 0 16px; }
+    .tab { padding: 12px 14px; font-size: 13px; }
+  }
+
+  .hidden { display: none !important; }
+  .empty-state { text-align: center; padding: 40px; color: var(--text-muted); }
+  .empty-icon { font-size: 48px; margin-bottom: 12px; }
+
+  /* Toast */
+  .toast {
+    position: fixed; bottom: 24px; right: 24px; background: var(--primary-dark);
+    color: white; padding: 12px 20px; border-radius: 10px; font-size: 14px;
+    box-shadow: 0 4px 20px rgba(0,0,0,0.2); z-index: 999;
+    transform: translateY(100px); opacity: 0; transition: all 0.3s;
+  }
+  .toast.show { transform: translateY(0); opacity: 1; }
+
+  /* 印刷ボタン */
+  .print-bar {
+    display: flex; justify-content: flex-end; gap: 8px;
+    margin-bottom: 16px;
+  }
+  .btn-print {
+    display: flex; align-items: center; gap: 6px;
+    padding: 8px 16px; border-radius: 8px; border: 1.5px solid var(--border);
+    background: white; color: var(--text); font-size: 13px; font-weight: 600;
+    cursor: pointer; transition: all 0.2s;
+  }
+  .btn-print:hover { border-color: var(--primary); color: var(--primary); background: var(--accent2); }
+  .btn-print-primary {
+    background: var(--primary); color: white; border-color: var(--primary);
+  }
+  .btn-print-primary:hover { background: var(--primary-dark); border-color: var(--primary-dark); color: white; }
+
+  /* ===== 印刷スタイル ===== */
+  @media print {
+    body { background: white !important; font-size: 11pt; }
+    header, .tabs, .filter-bar, .print-bar, .action-btn,
+    .go-date-area, .store-badge, #offset-panel,
+    .modal-overlay, .toast { display: none !important; }
+    main { padding: 0 !important; max-width: 100% !important; }
+    .stat-card { box-shadow: none !important; border: 1px solid #ccc; }
+    .task-table { box-shadow: none !important; font-size: 9pt; }
+    .task-table th { background: #1a6b3c !important; color: white !important; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+    .gantt-bar { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+    .gantt-table th { background: #0f4526 !important; color: white !important; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+    .phase-section { break-inside: avoid; }
+    .stat-card { break-inside: avoid; }
+    .hidden { display: none !important; }
+    /* 印刷対象以外を非表示 */
+    .print-hide { display: none !important; }
+    .print-show { display: block !important; }
+  }
+</style>
+</head>
+<body>
+
+<!-- HEADER -->
+<header>
+  <div class="header-left">
+    <div>
+      <div class="logo">Gong <span>cha</span></div>
+      <div class="header-subtitle">新店出店 タスク管理システム</div>
+    </div>
+  </div>
+  <div class="header-right">
+    <!-- GO日入力 + 逆算ボタン -->
+    <div class="go-date-area">
+      <span class="go-date-label">🎯 GO日</span>
+      <input type="date" class="go-date-input" id="header-go-date" onchange="onHeaderGoDateChange()">
+      <button class="go-recalc-btn" onclick="openRecalcPreview()">逆算する</button>
+    </div>
+    <div class="store-badge" onclick="openStoreModal()">🏪 <span id="currentStoreName">イオンモール神戸北店</span> ▾</div>
+  </div>
+</header>
+
+<!-- 逆算プレビューモーダル -->
+<div class="modal-overlay" id="recalc-modal">
+  <div class="modal" style="max-width:600px;">
+    <div class="modal-header">
+      <div class="modal-title">📅 GO日逆算 — スケジュール変更プレビュー</div>
+      <button class="modal-close" onclick="closeModal('recalc-modal')">×</button>
+    </div>
+    <div id="recalc-info" style="background:var(--accent2); border-radius:8px; padding:12px 16px; font-size:13px; margin-bottom:12px;"></div>
+    <div style="font-size:12px; color:var(--text-muted); margin-bottom:8px;">
+      ✅ 完了済みタスクは変更されません。日付未設定のタスクは除外されます。
+    </div>
+    <div class="recalc-preview" id="recalc-preview-list"></div>
+    <div class="modal-footer">
+      <button class="btn btn-outline" onclick="closeModal('recalc-modal')">キャンセル</button>
+      <button class="btn btn-primary" onclick="applyRecalc()">✅ このスケジュールで適用する</button>
+    </div>
+  </div>
+</div>
+
+<!-- TABS -->
+<div class="tabs">
+  <div class="tab active" onclick="switchTab('dashboard')" id="tab-dashboard">
+    <span class="tab-icon">📊</span>ダッシュボード
+  </div>
+  <div class="tab" onclick="switchTab('tasks')" id="tab-tasks">
+    <span class="tab-icon">✅</span>タスク一覧
+  </div>
+  <div class="tab" onclick="switchTab('gantt')" id="tab-gantt">
+    <span class="tab-icon">📅</span>ガントチャート
+  </div>
+</div>
+
+<!-- MAIN -->
+<main>
+
+  <!-- ===== DASHBOARD ===== -->
+  <div id="view-dashboard">
+    <div class="print-bar">
+      <button class="btn-print" onclick="printView('dashboard')">🖨️ 印刷 / PDF保存</button>
+      <button class="btn-print btn-print-primary" onclick="exportView('dashboard')">📊 Excel風表示で印刷</button>
+    </div>
+    <div class="stats-grid">
+      <div class="stat-card total">
+        <div class="stat-label">総タスク数</div>
+        <div class="stat-value" id="stat-total">0</div>
+      </div>
+      <div class="stat-card done">
+        <div class="stat-label">✅ 完了</div>
+        <div class="stat-value" id="stat-done">0</div>
+      </div>
+      <div class="stat-card inprogress">
+        <div class="stat-label">🔵 進行中</div>
+        <div class="stat-value" id="stat-inprogress">0</div>
+      </div>
+      <div class="stat-card todo">
+        <div class="stat-label">⚪ 未着手</div>
+        <div class="stat-value" id="stat-todo">0</div>
+      </div>
+      <div class="stat-card overdue">
+        <div class="stat-label">🔴 期限超過</div>
+        <div class="stat-value" id="stat-overdue">0</div>
+      </div>
+    </div>
+
+    <div class="progress-section">
+      <div class="progress-header">
+        <div class="progress-title">全体進捗</div>
+        <div class="progress-pct" id="progress-pct">0%</div>
+      </div>
+      <div class="progress-bar-bg">
+        <div class="progress-bar-fill" id="progress-bar" style="width:0%"></div>
+      </div>
+      <div class="progress-phases" id="phase-progress"></div>
+    </div>
+
+    <div style="display:grid; grid-template-columns: 1fr 1fr; gap:16px; margin-bottom:24px;">
+      <!-- 期限が近いタスク -->
+      <div style="background:white; border-radius:12px; padding:20px; box-shadow:var(--shadow);">
+        <div style="font-size:15px; font-weight:800; margin-bottom:14px; color:var(--primary-dark);">⚠️ 期限が近いタスク（7日以内）</div>
+        <div id="upcoming-tasks"></div>
+      </div>
+      <!-- 担当者別 -->
+      <div style="background:white; border-radius:12px; padding:20px; box-shadow:var(--shadow);">
+        <div style="font-size:15px; font-weight:800; margin-bottom:14px; color:var(--primary-dark);">👤 担当者別タスク数</div>
+        <div id="assignee-stats"></div>
+      </div>
+    </div>
+
+    <!-- GO日カウントダウン -->
+    <div id="countdown-card" style="background:linear-gradient(135deg,var(--primary-dark),var(--primary)); color:white; border-radius:12px; padding:24px; box-shadow:var(--shadow); text-align:center;">
+      <div style="font-size:13px; opacity:0.8; margin-bottom:8px;">グランドオープンまで</div>
+      <div id="countdown-days" style="font-size:56px; font-weight:900; line-height:1;"></div>
+      <div style="font-size:14px; opacity:0.8; margin-top:8px;" id="countdown-date"></div>
+    </div>
+  </div>
+
+  <!-- ===== TASK LIST ===== -->
+  <div id="view-tasks" class="hidden">
+
+    <!-- 印刷ボタン -->
+    <div class="print-bar">
+      <button class="btn-print" onclick="printView('tasks')">🖨️ 印刷 / PDF保存</button>
+      <button class="btn-print btn-print-primary" onclick="exportView('tasks')">📊 Excel風表示で印刷</button>
+    </div>
+
+    <!-- GO日逆算スケジュール設定パネル -->
+    <div id="offset-panel" style="background:white; border-radius:12px; padding:18px 20px; box-shadow:var(--shadow); margin-bottom:16px; border-left:4px solid var(--accent);">
+      <div style="display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:10px;">
+        <div>
+          <div style="font-size:14px; font-weight:800; color:var(--primary-dark);">📐 GO日逆算スケジュール設定</div>
+          <div style="font-size:12px; color:var(--text-muted); margin-top:2px;">各タスクの「GO日の何日前か」を入力すると、開始日・完了日が自動計算されます</div>
+        </div>
+        <div style="display:flex; align-items:center; gap:10px; flex-wrap:wrap;">
+          <div style="font-size:13px; color:var(--text-muted);">現在のGO日：<strong id="panel-go-date-label" style="color:var(--primary);">—</strong></div>
+          <label style="display:flex; align-items:center; gap:6px; font-size:13px; cursor:pointer;">
+            <input type="checkbox" id="show-offset-cols" onchange="renderTasks()" style="accent-color:var(--primary); width:15px; height:15px;">
+            <span>逆算列を表示</span>
+          </label>
+        </div>
+      </div>
+    </div>
+
+    <div class="filter-bar">
+      <input type="text" id="search-input" placeholder="🔍 タスク名・内容で検索..." oninput="renderTasks()">
+      <select id="filter-status" onchange="renderTasks()">
+        <option value="">すべてのステータス</option>
+        <option value="todo">未着手</option>
+        <option value="inprogress">進行中</option>
+        <option value="done">完了</option>
+        <option value="overdue">期限超過</option>
+      </select>
+      <select id="filter-phase" onchange="renderTasks()">
+        <option value="">すべてのフェーズ</option>
+        <option value="引渡しまでに行うこと">引渡し前</option>
+        <option value="引渡し後に行うこと">引渡し後</option>
+        <option value="GO後に行うこと">GO後</option>
+      </select>
+      <select id="filter-assignee" onchange="renderTasks()">
+        <option value="">すべての担当者</option>
+      </select>
+      <button class="btn btn-primary" onclick="openAddModal()">＋ タスク追加</button>
+    </div>
+    <div id="task-list-container"></div>
+  </div>
+
+  <!-- ===== GANTT ===== -->
+  <div id="view-gantt" class="hidden">
+    <div class="print-bar">
+      <button class="btn-print" onclick="printView('gantt')">🖨️ 印刷 / PDF保存</button>
+      <button class="btn-print btn-print-primary" onclick="exportView('gantt')">📊 Excel風表示で印刷</button>
+    </div>
+    <div class="filter-bar">
+      <select id="gantt-filter-phase" onchange="renderGantt()">
+        <option value="">すべてのフェーズ</option>
+        <option value="引渡しまでに行うこと">引渡し前</option>
+        <option value="引渡し後に行うこと">引渡し後</option>
+        <option value="GO後に行うこと">GO後</option>
+      </select>
+      <select id="gantt-filter-status" onchange="renderGantt()">
+        <option value="">すべてのステータス</option>
+        <option value="todo">未着手</option>
+        <option value="inprogress">進行中</option>
+        <option value="done">完了</option>
+      </select>
+      <span style="font-size:12px; color:var(--text-muted); margin-left:auto;">
+        🟩 完了 &nbsp; 🟦 進行中 &nbsp; ⬜ 未着手 &nbsp; 🟥 期限超過 &nbsp; 🟨 今日
+      </span>
+    </div>
+    <div class="gantt-container">
+      <div class="gantt-scroll">
+        <div id="gantt-content"></div>
+      </div>
+    </div>
+  </div>
+
+</main>
+
+<!-- TASK MODAL -->
+<div class="modal-overlay" id="task-modal">
+  <div class="modal">
+    <div class="modal-header">
+      <div class="modal-title" id="modal-title">タスク詳細</div>
+      <button class="modal-close" onclick="closeModal('task-modal')">×</button>
+    </div>
+    <div class="form-group">
+      <label class="form-label">タスク名 *</label>
+      <input type="text" class="form-input" id="modal-name" placeholder="タスク名を入力">
+    </div>
+    <div class="form-group">
+      <label class="form-label">内容・説明</label>
+      <textarea class="form-textarea" id="modal-desc" placeholder="詳細説明"></textarea>
+    </div>
+    <div class="form-group">
+      <label class="form-label">メモ</label>
+      <input type="text" class="form-input" id="modal-memo" placeholder="メモ">
+    </div>
+    <div class="form-row">
+      <div class="form-group">
+        <label class="form-label">担当者</label>
+        <input type="text" class="form-input" id="modal-assignee" placeholder="例: SV, FBL, GM">
+      </div>
+      <div class="form-group">
+        <label class="form-label">フェーズ</label>
+        <select class="form-select" id="modal-phase">
+          <option value="引渡しまでに行うこと">引渡し前</option>
+          <option value="引渡し後に行うこと">引渡し後</option>
+          <option value="GO後に行うこと">GO後</option>
+        </select>
+      </div>
+    </div>
+    <div class="form-row">
+      <div class="form-group">
+        <label class="form-label">開始日</label>
+        <input type="date" class="form-input" id="modal-start">
+      </div>
+      <div class="form-group">
+        <label class="form-label">完了予定日</label>
+        <input type="date" class="form-input" id="modal-end">
+      </div>
+    </div>
+    <div class="form-group">
+      <label class="form-label">ステータス</label>
+      <select class="form-select" id="modal-status">
+        <option value="todo">⚪ 未着手</option>
+        <option value="inprogress">🔵 進行中</option>
+        <option value="done">✅ 完了</option>
+      </select>
+    </div>
+
+    <!-- コメント -->
+    <div class="comment-section" id="comment-section">
+      <div style="font-size:13px; font-weight:700; margin-bottom:10px;">💬 コメント</div>
+      <div id="comment-list"></div>
+      <div class="comment-input-row">
+        <input type="text" id="comment-input" placeholder="コメントを入力..." onkeydown="if(event.key==='Enter')addComment()">
+        <button class="btn btn-primary btn-sm" onclick="addComment()">送信</button>
+      </div>
+    </div>
+
+    <div class="modal-footer">
+      <button class="btn btn-outline" id="delete-btn" onclick="deleteTask()" style="color:var(--overdue); border-color:var(--overdue);">削除</button>
+      <button class="btn btn-outline" onclick="closeModal('task-modal')">キャンセル</button>
+      <button class="btn btn-primary" onclick="saveTask()">保存</button>
+    </div>
+  </div>
+</div>
+
+<!-- STORE MODAL -->
+<div class="modal-overlay" id="store-modal">
+  <div class="modal" style="max-width:480px;">
+    <div class="modal-header">
+      <div class="modal-title">🏪 店舗管理</div>
+      <button class="modal-close" onclick="closeModal('store-modal')">×</button>
+    </div>
+    <div class="store-list" id="store-list"></div>
+    <div style="border-top:1px solid var(--border); padding-top:16px;">
+      <div style="font-size:13px; font-weight:700; margin-bottom:10px;">新しい店舗を追加</div>
+      <div class="form-row">
+        <input type="text" class="form-input" id="new-store-name" placeholder="店舗名">
+        <input type="date" class="form-input" id="new-store-go" placeholder="GO日">
+      </div>
+      <button class="btn btn-primary" style="margin-top:10px; width:100%;" onclick="addStore()">追加</button>
+    </div>
+  </div>
+</div>
+
+<!-- TOAST -->
+<div class="toast" id="toast"></div>
+
+<script>
+// ===== DATA =====
+const TODAY = new Date(); TODAY.setHours(0,0,0,0);
+
+const DEFAULT_TASKS = [
+  // 引渡しまでに行うこと
+  { id:1, phase:'引渡しまでに行うこと', name:'キックオフMtg', desc:'店舗図面・施策などについて打ち合わせ（GO約2か月前）（可能ならばFTも参加）', memo:'予定なし', assignee:'FBL', start:'', end:'', status:'todo', comments:[] },
+  { id:2, phase:'引渡しまでに行うこと', name:'面接', desc:'売上予算から必要人数を算出し採用する', memo:'', assignee:'', start:'2026-02-18', end:'2026-03-21', status:'done', comments:[] },
+  { id:3, phase:'引渡しまでに行うこと', name:'防火・防災書類提出', desc:'建設チームから受け取り、提出期限を確認して所轄の消防署へ提出', memo:'', assignee:'', start:'', end:'', status:'todo', comments:[] },
+  { id:4, phase:'引渡しまでに行うこと', name:'保健所', desc:'QAチームから連絡をもらい、提出期限を確認して所轄の保健所へ提出', memo:'', assignee:'', start:'2026-03-01', end:'2026-03-07', status:'done', comments:[] },
+  { id:5, phase:'引渡しまでに行うこと', name:'入社書類の準備', desc:'入社書類一式の準備', memo:'', assignee:'', start:'2026-03-29', end:'2026-03-30', status:'done', comments:[] },
+  { id:6, phase:'引渡しまでに行うこと', name:'ノービルアカウント作成', desc:'採用者のノービルアカウントを作成', memo:'', assignee:'', start:'2026-03-29', end:'2026-03-30', status:'done', comments:[] },
+  { id:7, phase:'引渡しまでに行うこと', name:'オリエンテーション会場手配', desc:'引渡し日により必要ならば会場を手配', memo:'', assignee:'', start:'', end:'', status:'todo', comments:[] },
+  { id:8, phase:'引渡しまでに行うこと', name:'初回発注', desc:'SCMからのメールにて期日までに発注を行う ※アスクルは別途忘れずに', memo:'', assignee:'SV', start:'2026-03-10', end:'2026-03-16', status:'done', comments:[] },
+  { id:9, phase:'引渡しまでに行うこと', name:'採用別媒体の検討', desc:'採用予定者数の確保が困難な場合は、別媒体掲出を行う（推奨）', memo:'', assignee:'', start:'', end:'', status:'todo', comments:[] },
+  { id:10, phase:'引渡しまでに行うこと', name:'施設納品動線の確認', desc:'荷捌き場や納品ルートを確認の上、届け出を完了させる', memo:'', assignee:'', start:'', end:'', status:'todo', comments:[] },
+  { id:11, phase:'引渡しまでに行うこと', name:'施設説明会', desc:'施設説明会に参加して、店舗運営のルールと提出書類を確認する', memo:'', assignee:'', start:'', end:'', status:'todo', comments:[] },
+  { id:12, phase:'引渡しまでに行うこと', name:'従業員研修', desc:'店舗勤務者の受講手続きを完了させる', memo:'', assignee:'', start:'', end:'', status:'todo', comments:[] },
+  { id:13, phase:'引渡しまでに行うこと', name:'シェアフルシフト', desc:'採用者のアカウント作成', memo:'', assignee:'', start:'', end:'', status:'todo', comments:[] },
+  { id:14, phase:'引渡しまでに行うこと', name:'トレーニングプラン作成', desc:'新規採用クルーのオリエンテーションからドライランのスケジュールを作成する', memo:'', assignee:'', start:'2026-03-01', end:'2026-03-07', status:'done', comments:[] },
+  { id:15, phase:'引渡しまでに行うこと', name:'NFS基準の説明', desc:'※新規加盟FC様向け', memo:'', assignee:'', start:'', end:'', status:'todo', comments:[] },
+  { id:16, phase:'引渡しまでに行うこと', name:'店舗月次ルーティンの説明', desc:'※新規加盟FC様向け', memo:'', assignee:'', start:'', end:'', status:'todo', comments:[] },
+  // 引渡し後に行うこと
+  { id:17, phase:'引渡し後に行うこと', name:'GO（グランドオープン）', desc:'グランドオープン', memo:'', assignee:'', start:'2026-04-16', end:'2026-04-16', status:'inprogress', comments:[], isGoTask: true },
+  { id:18, phase:'引渡し後に行うこと', name:'引き渡し', desc:'区画引渡し', memo:'', assignee:'', start:'2026-04-04', end:'2026-04-04', status:'done', comments:[] },
+  { id:19, phase:'引渡し後に行うこと', name:'オリエンテーション', desc:'入社書類作成とオリエンテーションの実施', memo:'', assignee:'', start:'2026-03-31', end:'2026-04-01', status:'done', comments:[] },
+  { id:20, phase:'引渡し後に行うこと', name:'トレーニング DAY1', desc:'ドリンク作成の練習（DAY1は多めに設定する）', memo:'', assignee:'', start:'2026-04-02', end:'2026-04-04', status:'done', comments:[] },
+  { id:21, phase:'引渡し後に行うこと', name:'トレーニング DAY2', desc:'ポジション練習', memo:'', assignee:'', start:'2026-04-06', end:'2026-04-07', status:'done', comments:[] },
+  { id:22, phase:'引渡し後に行うこと', name:'トレーニング DAY3', desc:'ポジション練習', memo:'', assignee:'', start:'2026-04-08', end:'2026-04-09', status:'done', comments:[] },
+  { id:23, phase:'引渡し後に行うこと', name:'トレーニング DAY4（ドライラン）', desc:'ドライラン', memo:'', assignee:'', start:'2026-04-10', end:'2026-04-13', status:'inprogress', comments:[] },
+  { id:24, phase:'引渡し後に行うこと', name:'オープン前日の準備', desc:'シフト、在庫の確認、仕込み実施、施設の営業担当と打ち合わせ', memo:'', assignee:'', start:'2026-04-15', end:'2026-04-15', status:'todo', comments:[] },
+  { id:25, phase:'引渡し後に行うこと', name:'売上予測', desc:'TastyQubeに月次予算を入力・HANZOへのイベント情報の入力', memo:'', assignee:'', start:'2026-04-04', end:'2026-04-11', status:'done', comments:[] },
+  { id:26, phase:'引渡し後に行うこと', name:'シフト作成', desc:'1週間前には確定させる', memo:'', assignee:'', start:'2026-04-04', end:'2026-04-11', status:'done', comments:[] },
+  { id:27, phase:'引渡し後に行うこと', name:'初回発注以降の発注', desc:'納品サイクルの確認と発注の実施。※GO当日の納品は避ける（推奨）', memo:'', assignee:'', start:'2026-04-01', end:'2026-05-30', status:'inprogress', comments:[] },
+  { id:28, phase:'引渡し後に行うこと', name:'釣銭準備金の準備', desc:'GO１週間前には準備を完了させる', memo:'', assignee:'', start:'2026-04-05', end:'2026-04-08', status:'done', comments:[] },
+  { id:29, phase:'引渡し後に行うこと', name:'ポールパーテーション手配', desc:'注文列とOW列の動線をシミュレーションして、必要本数を発注する', memo:'', assignee:'', start:'2026-03-31', end:'2026-04-02', status:'done', comments:[] },
+  { id:30, phase:'引渡し後に行うこと', name:'リーダー候補の選出', desc:'運営力強化のため早期に選出する', memo:'', assignee:'', start:'2026-04-01', end:'2026-04-10', status:'done', comments:[] },
+  { id:31, phase:'引渡し後に行うこと', name:'冷蔵・冷凍庫テプラ貼り付け', desc:'オープンチェック表に冷蔵・冷凍庫の温度を記入するために場所を決める', memo:'', assignee:'', start:'2026-03-31', end:'2026-03-31', status:'done', comments:[] },
+  { id:32, phase:'引渡し後に行うこと', name:'初回納品と棚割り', desc:'スムーズなオペレーション動線と衛生管理基準に則った棚割りを行い片付ける', memo:'', assignee:'', start:'2026-03-31', end:'2026-03-31', status:'done', comments:[] },
+  { id:33, phase:'引渡し後に行うこと', name:'業務のルーティン化', desc:'時間帯ごとに実施する業務を明確にする（インベントリー・クレンリネス・両替など）', memo:'', assignee:'', start:'2026-03-22', end:'2026-03-28', status:'done', comments:[] },
+  { id:34, phase:'引渡し後に行うこと', name:'緊急連絡先作成', desc:'緊急連絡先を作成し掲出する（ブランクはノービルにあり）', memo:'', assignee:'', start:'2026-03-30', end:'2026-03-31', status:'done', comments:[] },
+  { id:35, phase:'引渡し後に行うこと', name:'ポジショニングガイド', desc:'各ポジションの動き方を明確にする。サブワークは店舗により調整が必要。', memo:'', assignee:'', start:'2026-03-29', end:'2026-04-01', status:'done', comments:[] },
+  { id:36, phase:'引渡し後に行うこと', name:'ウィークリー清掃表作成', desc:'トレーニング開始までには作成させる　クレンリネスの意識を根付かせる', memo:'', assignee:'', start:'2026-03-31', end:'2026-04-09', status:'done', comments:[] },
+  { id:37, phase:'引渡し後に行うこと', name:'清掃マニュアル準備', desc:'ラミネートして設置（クレンリネスマニュアル）', memo:'', assignee:'', start:'2026-03-15', end:'2026-03-21', status:'done', comments:[] },
+  { id:38, phase:'引渡し後に行うこと', name:'レシピマニュアル設置', desc:'ラミネートして掲出（パール・MF・パウダー数表・他）', memo:'', assignee:'', start:'2026-03-15', end:'2026-03-21', status:'done', comments:[] },
+  { id:39, phase:'引渡し後に行うこと', name:'帳票類の準備', desc:'定位置管理の場所を決めて、漏れが無いように記入する', memo:'', assignee:'', start:'2026-03-31', end:'2026-03-31', status:'done', comments:[] },
+  { id:40, phase:'引渡し後に行うこと', name:'消防立ち入り検査', desc:'検査日時は消防署から連絡あり', memo:'', assignee:'', start:'2026-03-31', end:'2026-03-31', status:'done', comments:[] },
+  { id:41, phase:'引渡し後に行うこと', name:'保健所立ち入り検査', desc:'検査日時は保健所から連絡あり', memo:'', assignee:'', start:'2026-03-31', end:'2026-03-31', status:'done', comments:[] },
+  { id:42, phase:'引渡し後に行うこと', name:'片付けとセッティング', desc:'初回納品後にエクイップメントの洗浄と設置を行う', memo:'', assignee:'', start:'2026-03-31', end:'2026-03-31', status:'done', comments:[] },
+  // GO後に行うこと
+  { id:43, phase:'GO後に行うこと', name:'オペレーション集中', desc:'GOから1～2週間程度は店舗運営に集中する（Brewing Happiness）', memo:'', assignee:'', start:'2026-04-16', end:'2026-04-19', status:'todo', comments:[] },
+  { id:44, phase:'GO後に行うこと', name:'リーダー育成', desc:'オペレーション集中後はリーダー育成を開始する', memo:'', assignee:'', start:'', end:'', status:'todo', comments:[] },
+  { id:45, phase:'GO後に行うこと', name:'CL作業分担', desc:'GO後に売上動向を把握してCL作業の人数と役割分担を決める', memo:'', assignee:'', start:'', end:'', status:'todo', comments:[] },
+  { id:46, phase:'GO後に行うこと', name:'Cash開局トレーニング', desc:'リーダー候補者へOP作業のトレーニング', memo:'', assignee:'', start:'', end:'', status:'todo', comments:[] },
+  { id:47, phase:'GO後に行うこと', name:'Cash閉局トレーニング', desc:'リーダー候補者へCL作業のトレーニング', memo:'', assignee:'', start:'', end:'', status:'todo', comments:[] },
+  { id:48, phase:'GO後に行うこと', name:'営業許可証の受取りと提出', desc:'保健所から発行完了の連絡がはいるので、受け取ったらGCJに原本のコピーを提出', memo:'', assignee:'', start:'', end:'', status:'todo', comments:[] },
+  { id:49, phase:'GO後に行うこと', name:'QSCレポート', desc:'ストアオーディットの基準を満たす店舗運営を行う', memo:'', assignee:'', start:'', end:'', status:'todo', comments:[] },
+  { id:50, phase:'GO後に行うこと', name:'smileスコア共有', desc:'チームでsmileスコアが高い店舗を目指す', memo:'', assignee:'', start:'', end:'', status:'todo', comments:[] },
+  { id:51, phase:'GO後に行うこと', name:'週次・月次ルーティンの実施', desc:'週次LTO棚卸、ノービル職位変更、クルー割、月次棚卸、他', memo:'', assignee:'', start:'', end:'', status:'todo', comments:[] },
+];
+
+const DEFAULT_STORES = [
+  { id: 'store1', name: 'イオンモール神戸北店', goDate: '2026-04-16' }
+];
+
+// ===== FIREBASE CONFIG =====
+// ⚠️ 以下の設定値をご自身のFirebaseプロジェクトのものに書き換えてください
+const FIREBASE_CONFIG = {
+  apiKey:            "YOUR_API_KEY",
+  authDomain:        "YOUR_PROJECT.firebaseapp.com",
+  databaseURL:       "https://YOUR_PROJECT-default-rtdb.firebaseio.com",
+  projectId:         "YOUR_PROJECT",
+  storageBucket:     "YOUR_PROJECT.appspot.com",
+  messagingSenderId: "YOUR_SENDER_ID",
+  appId:             "YOUR_APP_ID"
+};
+
+// ===== STATE =====
+let state = {
+  stores: DEFAULT_STORES,
+  currentStoreId: 'store1',
+  tasks: {},
+  editingTaskId: null,
+  nextId: 100,
+  db: null,          // Firebase DB インスタンス
+  fbFns: null,       // Firebase 関数群
+  _fbListeners: [],  // リスナー解除用
+};
+
+// Firebase未設定チェック
+const FB_CONFIGURED = FIREBASE_CONFIG.apiKey !== 'YOUR_API_KEY';
+
+function currentTasks() { return state.tasks[state.currentStoreId] || []; }
+function currentStore() { return state.stores.find(s => s.id === state.currentStoreId); }
+
+// ===== SAVE: Firebase or localStorage フォールバック =====
+function saveTasks() {
+  if (FB_CONFIGURED && state.db && state.fbFns) {
+    const { ref, set } = state.fbFns;
+    // comments配列をオブジェクトに変換（Firebase配列対策）
+    const tasks = currentTasks().map(t => ({
+      ...t,
+      comments: t.comments && t.comments.length
+        ? Object.fromEntries(t.comments.map((c, i) => [i, c]))
+        : {}
+    }));
+    const tasksObj = Object.fromEntries(tasks.map(t => [String(t.id), t]));
+    set(ref(state.db, `stores/${state.currentStoreId}/tasks`), tasksObj)
+      .catch(e => console.error('Firebase write error:', e));
+  } else {
+    localStorage.setItem(`gc_tasks_${state.currentStoreId}`, JSON.stringify(currentTasks()));
+  }
+}
+
+function saveStores() {
+  if (FB_CONFIGURED && state.db && state.fbFns) {
+    const { ref, set } = state.fbFns;
+    const storesObj = Object.fromEntries(state.stores.map(s => [s.id, { name: s.name, goDate: s.goDate || '' }]));
+    set(ref(state.db, 'storesMeta'), storesObj)
+      .catch(e => console.error('Firebase write error:', e));
+    localStorage.setItem('gc_currentStore', state.currentStoreId);
+  } else {
+    localStorage.setItem('gc_stores', JSON.stringify(state.stores));
+    localStorage.setItem('gc_currentStore', state.currentStoreId);
+  }
+}
+
+// ===== UTILS =====
+function parseDate(s) { if (!s) return null; return new Date(s + 'T00:00:00'); }
+function fmtDate(s) { if (!s) return '—'; const d = parseDate(s); return `${d.getMonth()+1}/${d.getDate()}`; }
+function fmtDateFull(s) { if (!s) return '—'; const d = parseDate(s); return `${d.getFullYear()}/${d.getMonth()+1}/${d.getDate()}`; }
+
+function getEffectiveStatus(task) {
+  if (task.status === 'done') return 'done';
+  if (task.end && parseDate(task.end) < TODAY && task.status !== 'done') return 'overdue';
+  return task.status;
+}
+
+function statusLabel(s) {
+  return { todo:'⚪ 未着手', inprogress:'🔵 進行中', done:'✅ 完了', overdue:'🔴 期限超過' }[s] || s;
+}
+function statusClass(s) {
+  return { todo:'status-todo', inprogress:'status-inprogress', done:'status-done', overdue:'status-overdue' }[s] || '';
+}
+
+function showToast(msg) {
+  const t = document.getElementById('toast');
+  t.textContent = msg; t.classList.add('show');
+  setTimeout(() => t.classList.remove('show'), 2500);
+}
+
+// ===== TABS =====
+function switchTab(tab) {
+  ['dashboard','tasks','gantt'].forEach(v => {
+    document.getElementById(`view-${v}`).classList.toggle('hidden', v !== tab);
+    document.getElementById(`tab-${v}`).classList.toggle('active', v === tab);
+  });
+  if (tab === 'dashboard') renderDashboard();
+  if (tab === 'tasks') renderTasks();
+  if (tab === 'gantt') renderGantt();
+}
+
+// ===== DASHBOARD =====
+function renderDashboard() {
+  const tasks = currentTasks();
+  const store = currentStore();
+  const statuses = tasks.map(t => getEffectiveStatus(t));
+  const total = tasks.length;
+  const done = statuses.filter(s => s === 'done').length;
+  const inprogress = statuses.filter(s => s === 'inprogress').length;
+  const todo = statuses.filter(s => s === 'todo').length;
+  const overdue = statuses.filter(s => s === 'overdue').length;
+
+  document.getElementById('stat-total').textContent = total;
+  document.getElementById('stat-done').textContent = done;
+  document.getElementById('stat-inprogress').textContent = inprogress;
+  document.getElementById('stat-todo').textContent = todo;
+  document.getElementById('stat-overdue').textContent = overdue;
+
+  const pct = total ? Math.round(done / total * 100) : 0;
+  document.getElementById('progress-pct').textContent = pct + '%';
+  document.getElementById('progress-bar').style.width = pct + '%';
+
+  // Phase progress
+  const phases = ['引渡しまでに行うこと','引渡し後に行うこと','GO後に行うこと'];
+  const phaseLabels = ['引渡し前','引渡し後','GO後'];
+  const phaseColors = ['#1a6b3c','#3b82f6','#f5a623'];
+  const pp = document.getElementById('phase-progress');
+  pp.innerHTML = phases.map((ph, i) => {
+    const pt = tasks.filter(t => t.phase === ph);
+    const pd = pt.filter(t => getEffectiveStatus(t) === 'done').length;
+    const ppct = pt.length ? Math.round(pd / pt.length * 100) : 0;
+    return `<div class="phase-chip"><div class="phase-dot" style="background:${phaseColors[i]}"></div><strong>${phaseLabels[i]}</strong>: ${pd}/${pt.length} (${ppct}%)</div>`;
+  }).join('');
+
+  // Upcoming tasks (7 days)
+  const upcoming = tasks.filter(t => {
+    const s = getEffectiveStatus(t);
+    if (s === 'done') return false;
+    if (!t.end) return false;
+    const d = parseDate(t.end);
+    const diff = (d - TODAY) / 86400000;
+    return diff >= 0 && diff <= 7;
+  }).sort((a,b) => parseDate(a.end) - parseDate(b.end));
+
+  const ut = document.getElementById('upcoming-tasks');
+  if (upcoming.length === 0) {
+    ut.innerHTML = '<div style="color:var(--text-muted); font-size:13px;">期限が近いタスクはありません</div>';
+  } else {
+    ut.innerHTML = upcoming.map(t => {
+      const s = getEffectiveStatus(t);
+      return `<div style="display:flex; align-items:center; gap:8px; padding:8px 0; border-bottom:1px solid var(--border);">
+        <span class="status-badge ${statusClass(s)}">${statusLabel(s)}</span>
+        <div style="flex:1; font-size:13px; font-weight:600;">${t.name}</div>
+        <div style="font-size:12px; color:var(--overdue); font-weight:700;">${fmtDate(t.end)}</div>
+      </div>`;
+    }).join('');
+  }
+
+  // Assignee stats
+  const assignees = {};
+  tasks.forEach(t => {
+    const a = t.assignee || '未設定';
+    if (!assignees[a]) assignees[a] = {total:0, done:0};
+    assignees[a].total++;
+    if (getEffectiveStatus(t) === 'done') assignees[a].done++;
+  });
+  const as = document.getElementById('assignee-stats');
+  as.innerHTML = Object.entries(assignees).map(([a, v]) => {
+    const p = Math.round(v.done / v.total * 100);
+    return `<div style="margin-bottom:10px;">
+      <div style="display:flex; justify-content:space-between; font-size:13px; margin-bottom:4px;">
+        <span class="assignee-badge">${a}</span>
+        <span style="color:var(--text-muted);">${v.done}/${v.total} (${p}%)</span>
+      </div>
+      <div class="progress-bar-bg" style="height:6px;">
+        <div class="progress-bar-fill" style="width:${p}%"></div>
+      </div>
+    </div>`;
+  }).join('');
+
+  // Countdown
+  if (store && store.goDate) {
+    const go = parseDate(store.goDate);
+    const diff = Math.ceil((go - TODAY) / 86400000);
+    const cd = document.getElementById('countdown-days');
+    const cdate = document.getElementById('countdown-date');
+    if (diff > 0) {
+      cd.textContent = diff + '日';
+      cdate.textContent = `グランドオープン: ${fmtDateFull(store.goDate)}`;
+    } else if (diff === 0) {
+      cd.textContent = '🎉 本日GO！';
+      cdate.textContent = `グランドオープン: ${fmtDateFull(store.goDate)}`;
+    } else {
+      cd.textContent = `GO済み (+${Math.abs(diff)}日)`;
+      cdate.textContent = `グランドオープン: ${fmtDateFull(store.goDate)}`;
+    }
+  }
+}
+
+// ===== GO日からオフセット計算 =====
+// GO日とタスクの日付からオフセット（何日前か）を計算
+function calcOffset(dateStr, goDateStr) {
+  if (!dateStr || !goDateStr) return null;
+  const d = parseDate(dateStr);
+  const go = parseDate(goDateStr);
+  return Math.round((go - d) / 86400000); // 正=GO前, 負=GO後
+}
+
+// オフセットからタスク日付を計算
+function offsetToDate(offset, goDateStr) {
+  if (offset === null || offset === undefined || goDateStr === '') return '';
+  const go = parseDate(goDateStr);
+  if (!go) return '';
+  const result = new Date(go.getTime() - offset * 86400000);
+  return toDateStr(result);
+}
+
+// オフセット入力が変わったとき → タスクの日付を更新して再描画
+function onOffsetChange(taskId, field, value) {
+  const task = currentTasks().find(t => t.id === taskId);
+  const store = currentStore();
+  if (!task || !store || !store.goDate) return;
+  const offset = value === '' ? null : parseInt(value);
+  if (field === 'start') {
+    task.startOffset = offset;
+    if (offset !== null) task.start = offsetToDate(offset, store.goDate);
+  } else {
+    task.endOffset = offset;
+    if (offset !== null) task.end = offsetToDate(offset, store.goDate);
+  }
+  saveTasks();
+  // ガントが表示中なら更新
+  if (!document.getElementById('view-gantt').classList.contains('hidden')) renderGantt();
+  // 日付セルだけ更新（再描画せず）
+  const startCell = document.getElementById(`start-date-${taskId}`);
+  const endCell = document.getElementById(`end-date-${taskId}`);
+  if (startCell) startCell.textContent = task.start ? fmtDate(task.start) : '—';
+  if (endCell) endCell.textContent = task.end ? fmtDate(task.end) : '—';
+}
+
+// ===== TASK LIST =====
+function renderTasks() {
+  const search = document.getElementById('search-input').value.toLowerCase();
+  const filterStatus = document.getElementById('filter-status').value;
+  const filterPhase = document.getElementById('filter-phase').value;
+  const filterAssignee = document.getElementById('filter-assignee').value;
+  const showOffset = document.getElementById('show-offset-cols')?.checked || false;
+
+  // パネルのGO日ラベル更新
+  const store = currentStore();
+  const goDateStr = store?.goDate || '';
+  const panelLabel = document.getElementById('panel-go-date-label');
+  if (panelLabel) panelLabel.textContent = goDateStr ? fmtDateFull(goDateStr) : '未設定';
+
+  // Populate assignee filter
+  const assignees = [...new Set(currentTasks().map(t => t.assignee).filter(Boolean))];
+  const sel = document.getElementById('filter-assignee');
+  const cur = sel.value;
+  sel.innerHTML = '<option value="">すべての担当者</option>' + assignees.map(a => `<option value="${a}" ${a===cur?'selected':''}>${a}</option>`).join('');
+
+  const phases = ['引渡しまでに行うこと','引渡し後に行うこと','GO後に行うこと'];
+  const phaseLabels = { '引渡しまでに行うこと':'🏗️ 引渡し前', '引渡し後に行うこと':'🏪 引渡し後', 'GO後に行うこと':'🎉 GO後' };
+
+  let html = '';
+  phases.forEach(phase => {
+    if (filterPhase && filterPhase !== phase) return;
+    let tasks = currentTasks().filter(t => t.phase === phase);
+    if (search) tasks = tasks.filter(t => t.name.toLowerCase().includes(search) || t.desc.toLowerCase().includes(search));
+    if (filterStatus) tasks = tasks.filter(t => getEffectiveStatus(t) === filterStatus);
+    if (filterAssignee) tasks = tasks.filter(t => t.assignee === filterAssignee);
+    if (tasks.length === 0) return;
+
+    // オフセット列のヘッダー
+    const offsetHeaders = showOffset ? `
+      <th style="background:#1a4a2e; min-width:90px; text-align:center;">
+        <div style="font-size:10px; line-height:1.3;">開始<br><span style="color:var(--accent);">GO前○日</span></div>
+      </th>
+      <th style="background:#1a4a2e; min-width:90px; text-align:center;">
+        <div style="font-size:10px; line-height:1.3;">完了<br><span style="color:var(--accent);">GO前○日</span></div>
+      </th>` : '';
+
+    html += `<div class="phase-section">
+      <div class="phase-header" onclick="togglePhase(this)">
+        <div class="phase-title">${phaseLabels[phase]}</div>
+        <div class="phase-count">${tasks.length}</div>
+        <div class="phase-toggle">▾</div>
+      </div>
+      <div class="phase-body">
+      <table class="task-table">
+        <thead><tr>
+          <th style="width:24px;"></th>
+          <th>タスク名</th>
+          <th>担当</th>
+          ${offsetHeaders}
+          <th>開始日</th>
+          <th>完了予定日</th>
+          <th>ステータス</th>
+          <th>操作</th>
+        </tr></thead>
+        <tbody>`;
+
+    tasks.forEach(t => {
+      const s = getEffectiveStatus(t);
+      const isOverdue = s === 'overdue';
+
+      // オフセット値（既存日付から自動計算、または保存済み値）
+      const startOff = t.startOffset !== undefined && t.startOffset !== null
+        ? t.startOffset
+        : (t.start && goDateStr ? calcOffset(t.start, goDateStr) : '');
+      const endOff = t.endOffset !== undefined && t.endOffset !== null
+        ? t.endOffset
+        : (t.end && goDateStr ? calcOffset(t.end, goDateStr) : '');
+
+      const offsetCells = showOffset ? `
+        <td style="text-align:center; padding:8px;">
+          <div style="display:flex; align-items:center; gap:3px; justify-content:center;">
+            <input type="number" value="${startOff !== '' ? startOff : ''}"
+              placeholder="—"
+              onchange="onOffsetChange(${t.id},'start',this.value)"
+              style="width:60px; border:1.5px solid var(--border); border-radius:6px; padding:4px 6px;
+                     font-size:12px; text-align:center; outline:none; background:var(--bg);"
+              onfocus="this.style.borderColor='var(--accent)'" onblur="this.style.borderColor='var(--border)'">
+            <span style="font-size:10px; color:var(--text-muted);">日前</span>
+          </div>
+        </td>
+        <td style="text-align:center; padding:8px;">
+          <div style="display:flex; align-items:center; gap:3px; justify-content:center;">
+            <input type="number" value="${endOff !== '' ? endOff : ''}"
+              placeholder="—"
+              onchange="onOffsetChange(${t.id},'end',this.value)"
+              style="width:60px; border:1.5px solid var(--border); border-radius:6px; padding:4px 6px;
+                     font-size:12px; text-align:center; outline:none; background:var(--bg);"
+              onfocus="this.style.borderColor='var(--accent)'" onblur="this.style.borderColor='var(--border)'">
+            <span style="font-size:10px; color:var(--text-muted);">日前</span>
+          </div>
+        </td>` : '';
+
+      html += `<tr>
+        <td><input type="checkbox" ${t.status==='done'?'checked':''} onchange="toggleDone(${t.id}, this.checked)" style="width:16px;height:16px;cursor:pointer;accent-color:var(--primary);"></td>
+        <td>
+          <div class="task-name">${t.name}</div>
+          ${t.desc ? `<div class="task-desc">${t.desc.substring(0,60)}${t.desc.length>60?'…':''}</div>` : ''}
+        </td>
+        <td style="min-width:90px;">
+          <input type="text" value="${t.assignee || ''}" placeholder="担当者"
+            onchange="updateAssignee(${t.id}, this.value)"
+            style="width:80px; border:1.5px solid var(--border); border-radius:6px; padding:4px 8px;
+                   font-size:12px; font-weight:700; color:var(--primary-dark); background:var(--accent2);
+                   outline:none; cursor:text;"
+            onfocus="this.style.borderColor='var(--primary)'; this.style.background='white';"
+            onblur="this.style.borderColor='var(--border)'; this.style.background='var(--accent2)';">
+        </td>
+        ${offsetCells}
+        <td class="date-cell" id="start-date-${t.id}">${fmtDate(t.start)}</td>
+        <td class="date-cell ${isOverdue?'date-overdue':''}" id="end-date-${t.id}">${fmtDate(t.end)}${isOverdue?' ⚠️':''}</td>
+        <td><span class="status-badge ${statusClass(s)}">${statusLabel(s)}</span></td>
+        <td>
+          <button class="action-btn" onclick="openEditModal(${t.id})">✏️ 編集</button>
+        </td>
+      </tr>`;
+    });
+
+    html += `</tbody></table></div></div>`;
+  });
+
+  if (!html) html = `<div class="empty-state"><div class="empty-icon">🔍</div><div>条件に一致するタスクがありません</div></div>`;
+  document.getElementById('task-list-container').innerHTML = html;
+}
+
+function togglePhase(header) {
+  const body = header.nextElementSibling;
+  const toggle = header.querySelector('.phase-toggle');
+  body.classList.toggle('hidden');
+  toggle.classList.toggle('collapsed');
+}
+
+// 担当者をインラインで更新
+function updateAssignee(id, value) {
+  const task = currentTasks().find(t => t.id === id);
+  if (!task) return;
+  task.assignee = value.trim();
+  saveTasks();
+  // フィルターの担当者リストを更新（再描画はしない）
+  const assignees = [...new Set(currentTasks().map(t => t.assignee).filter(Boolean))];
+  const sel = document.getElementById('filter-assignee');
+  if (sel) {
+    const cur = sel.value;
+    sel.innerHTML = '<option value="">すべての担当者</option>' + assignees.map(a => `<option value="${a}" ${a===cur?'selected':''}>${a}</option>`).join('');
+  }
+}
+
+function toggleDone(id, checked) {
+  const task = currentTasks().find(t => t.id === id);
+  if (task) {
+    task.status = checked ? 'done' : 'todo';
+    saveTasks();
+    showToast(checked ? '✅ 完了にしました' : '⚪ 未着手に戻しました');
+    renderTasks();
+  }
+}
+
+// ===== MODAL =====
+function openAddModal() {
+  state.editingTaskId = null;
+  document.getElementById('modal-title').textContent = '＋ タスク追加';
+  document.getElementById('modal-name').value = '';
+  document.getElementById('modal-desc').value = '';
+  document.getElementById('modal-memo').value = '';
+  document.getElementById('modal-assignee').value = '';
+  document.getElementById('modal-phase').value = '引渡しまでに行うこと';
+  document.getElementById('modal-start').value = '';
+  document.getElementById('modal-end').value = '';
+  document.getElementById('modal-status').value = 'todo';
+  document.getElementById('comment-section').classList.add('hidden');
+  document.getElementById('delete-btn').classList.add('hidden');
+  document.getElementById('task-modal').classList.add('open');
+}
+
+function openEditModal(id) {
+  const task = currentTasks().find(t => t.id === id);
+  if (!task) return;
+  state.editingTaskId = id;
+  document.getElementById('modal-title').textContent = '✏️ タスク編集';
+  document.getElementById('modal-name').value = task.name;
+  document.getElementById('modal-desc').value = task.desc;
+  document.getElementById('modal-memo').value = task.memo;
+  document.getElementById('modal-assignee').value = task.assignee;
+  document.getElementById('modal-phase').value = task.phase;
+  document.getElementById('modal-start').value = task.start;
+  document.getElementById('modal-end').value = task.end;
+  document.getElementById('modal-status').value = task.status;
+  document.getElementById('comment-section').classList.remove('hidden');
+  document.getElementById('delete-btn').classList.remove('hidden');
+  renderComments(task);
+  document.getElementById('task-modal').classList.add('open');
+}
+
+function closeModal(id) { document.getElementById(id).classList.remove('open'); }
+
+function saveTask() {
+  const name = document.getElementById('modal-name').value.trim();
+  if (!name) { showToast('⚠️ タスク名を入力してください'); return; }
+  if (state.editingTaskId) {
+    const task = currentTasks().find(t => t.id === state.editingTaskId);
+    if (task) {
+      task.name = name;
+      task.desc = document.getElementById('modal-desc').value;
+      task.memo = document.getElementById('modal-memo').value;
+      task.assignee = document.getElementById('modal-assignee').value;
+      task.phase = document.getElementById('modal-phase').value;
+      task.start = document.getElementById('modal-start').value;
+      task.end = document.getElementById('modal-end').value;
+      task.status = document.getElementById('modal-status').value;
+    }
+    showToast('✅ タスクを更新しました');
+  } else {
+    const newTask = {
+      id: ++state.nextId,
+      phase: document.getElementById('modal-phase').value,
+      name, desc: document.getElementById('modal-desc').value,
+      memo: document.getElementById('modal-memo').value,
+      assignee: document.getElementById('modal-assignee').value,
+      start: document.getElementById('modal-start').value,
+      end: document.getElementById('modal-end').value,
+      status: document.getElementById('modal-status').value,
+      comments: []
+    };
+    currentTasks().push(newTask);
+    showToast('✅ タスクを追加しました');
+  }
+  saveTasks();
+  closeModal('task-modal');
+  renderTasks();
+}
+
+function deleteTask() {
+  if (!confirm('このタスクを削除しますか？')) return;
+  const idx = currentTasks().findIndex(t => t.id === state.editingTaskId);
+  if (idx !== -1) currentTasks().splice(idx, 1);
+  saveTasks();
+  closeModal('task-modal');
+  renderTasks();
+  showToast('🗑️ タスクを削除しました');
+}
+
+// ===== COMMENTS =====
+function renderComments(task) {
+  const list = document.getElementById('comment-list');
+  if (!task.comments || task.comments.length === 0) {
+    list.innerHTML = '<div style="color:var(--text-muted); font-size:12px; margin-bottom:8px;">コメントはまだありません</div>';
+    return;
+  }
+  list.innerHTML = task.comments.map(c => `
+    <div class="comment-item">
+      <div class="comment-meta">${c.author} · ${c.date}</div>
+      <div class="comment-text">${c.text}</div>
+    </div>`).join('');
+}
+
+function addComment() {
+  const input = document.getElementById('comment-input');
+  const text = input.value.trim();
+  if (!text) return;
+  const task = currentTasks().find(t => t.id === state.editingTaskId);
+  if (!task) return;
+  if (!task.comments) task.comments = [];
+  task.comments.push({
+    author: '玉田貴浩',
+    date: `${TODAY.getMonth()+1}/${TODAY.getDate()} ${TODAY.getHours()}:${String(TODAY.getMinutes()).padStart(2,'0')}`,
+    text
+  });
+  input.value = '';
+  saveTasks();
+  renderComments(task);
+}
+
+// ===== GANTT =====
+function renderGantt() {
+  const filterPhase = document.getElementById('gantt-filter-phase').value;
+  const filterStatus = document.getElementById('gantt-filter-status').value;
+
+  let tasks = currentTasks().filter(t => t.start && t.end);
+  if (filterPhase) tasks = tasks.filter(t => t.phase === filterPhase);
+  if (filterStatus) tasks = tasks.filter(t => getEffectiveStatus(t) === filterStatus);
+
+  if (tasks.length === 0) {
+    document.getElementById('gantt-content').innerHTML = '<div class="empty-state"><div class="empty-icon">📅</div><div>表示できるタスクがありません（開始日・完了日が設定されているタスクのみ表示）</div></div>';
+    return;
+  }
+
+  // Date range
+  const allDates = tasks.flatMap(t => [parseDate(t.start), parseDate(t.end)]).filter(Boolean);
+  let minDate = new Date(Math.min(...allDates));
+  let maxDate = new Date(Math.max(...allDates));
+  // Extend a bit
+  minDate.setDate(minDate.getDate() - 3);
+  maxDate.setDate(maxDate.getDate() + 7);
+
+  // Build date columns
+  const dates = [];
+  let d = new Date(minDate);
+  while (d <= maxDate) { dates.push(new Date(d)); d.setDate(d.getDate() + 1); }
+
+  // Group by month
+  const months = {};
+  dates.forEach(d => {
+    const key = `${d.getFullYear()}-${d.getMonth()+1}`;
+    if (!months[key]) months[key] = { label: `${d.getFullYear()}年${d.getMonth()+1}月`, count: 0 };
+    months[key].count++;
+  });
+
+  let html = '<table class="gantt-table"><thead>';
+  // Month row
+  html += '<tr><th class="task-col month-header">タスク名</th>';
+  Object.values(months).forEach(m => {
+    html += `<th class="month-header" colspan="${m.count}">${m.label}</th>`;
+  });
+  html += '</tr>';
+  // Day row
+  html += '<tr><th class="task-col">担当 / フェーズ</th>';
+  dates.forEach(d => {
+    const isToday = d.toDateString() === TODAY.toDateString();
+    const isWeekend = d.getDay() === 0 || d.getDay() === 6;
+    html += `<th style="${isToday?'background:var(--accent);color:#333;':isWeekend?'background:#2a5a3a;opacity:0.7;':''}">${d.getDate()}</th>`;
+  });
+  html += '</tr></thead><tbody>';
+
+  // Task rows
+  const phaseLabels = { '引渡しまでに行うこと':'引渡し前', '引渡し後に行うこと':'引渡し後', 'GO後に行うこと':'GO後' };
+  tasks.forEach(t => {
+    const s = getEffectiveStatus(t);
+    const barClass = { done:'done', inprogress:'inprogress', overdue:'overdue', todo:'' }[s] || '';
+    html += `<tr>
+      <td class="task-col" onclick="openEditModal(${t.id})" style="cursor:pointer;">
+        <div style="font-weight:700; font-size:12px;">${t.name}</div>
+        <div style="font-size:10px; color:var(--text-muted);">${t.assignee||''} ${phaseLabels[t.phase]||''}</div>
+      </td>`;
+    dates.forEach(d => {
+      const isToday = d.toDateString() === TODAY.toDateString();
+      const isWeekend = d.getDay() === 0 || d.getDay() === 6;
+      const inRange = t.start && t.end && d >= parseDate(t.start) && d <= parseDate(t.end);
+      const isStart = t.start && d.toDateString() === parseDate(t.start).toDateString();
+      const isEnd = t.end && d.toDateString() === parseDate(t.end).toDateString();
+      let cellStyle = isToday ? 'background:rgba(245,166,35,0.15);' : isWeekend ? 'background:#fafafa;' : '';
+      let inner = '';
+      if (inRange) {
+        const borderRadius = isStart && isEnd ? '4px' : isStart ? '4px 0 0 4px' : isEnd ? '0 4px 4px 0' : '0';
+        inner = `<div class="gantt-bar ${barClass}" style="border-radius:${borderRadius};"></div>`;
+      }
+      html += `<td style="${cellStyle} padding:4px 1px;">${inner}</td>`;
+    });
+    html += '</tr>';
+  });
+
+  html += '</tbody></table>';
+  document.getElementById('gantt-content').innerHTML = html;
+}
+
+// ===== STORE MODAL =====
+function openStoreModal() {
+  renderStoreList();
+  document.getElementById('store-modal').classList.add('open');
+}
+
+function renderStoreList() {
+  const list = document.getElementById('store-list');
+  list.innerHTML = state.stores.map(s => `
+    <div class="store-item ${s.id === state.currentStoreId ? 'active' : ''}" onclick="switchStore(${s.id})">
+      <div>
+        <div class="store-item-name">🏪 ${s.name}</div>
+        <div class="store-item-date">GO日: ${s.goDate ? fmtDateFull(s.goDate) : '未設定'}</div>
+      </div>
+      ${s.id === state.currentStoreId ? '<span style="color:var(--primary); font-weight:700;">✓ 選択中</span>' : ''}
+    </div>`).join('');
+}
+
+function switchStore(id) {
+  state.currentStoreId = id;
+  if (!state.tasks[id]) {
+    state.tasks[id] = DEFAULT_TASKS.map(t => ({...t, comments: []}));
+  }
+  saveStores();
+  const store = currentStore();
+  document.getElementById('currentStoreName').textContent = store.name;
+  // ヘッダーのGO日入力を切替先店舗のGO日に更新
+  if (store.goDate) {
+    document.getElementById('header-go-date').value = store.goDate;
+  }
+  closeModal('store-modal');
+  renderDashboard();
+  showToast(`🏪 ${store.name} に切り替えました`);
+}
+
+function addStore() {
+  const name = document.getElementById('new-store-name').value.trim();
+  const goDate = document.getElementById('new-store-go').value;
+  if (!name) { showToast('⚠️ 店舗名を入力してください'); return; }
+  // 文字列IDに対応したユニークID生成
+  const newId = 'store_' + Date.now();
+  // GO日が設定されている場合、デフォルトタスクの日付をGO日基準で逆算して設定
+  const baseGoDate = '2026-04-16'; // DEFAULT_TASKSの基準GO日
+  let newTasks;
+  if (goDate && goDate !== baseGoDate) {
+    const baseGo = parseDate(baseGoDate);
+    const newGo  = parseDate(goDate);
+    const diffMs = newGo - baseGo;
+    newTasks = DEFAULT_TASKS.map(t => {
+      const shifted = {
+        ...t,
+        id: t.id + 10000, // 新店舗用にIDをオフセット
+        comments: [],
+        status: 'todo',   // 新店舗は全タスク未着手
+      };
+      // 日付をGO日差分でシフト
+      if (t.start) shifted.start = toDateStr(new Date(parseDate(t.start).getTime() + diffMs));
+      if (t.end)   shifted.end   = toDateStr(new Date(parseDate(t.end).getTime()   + diffMs));
+      // GOタスクの名前も更新
+      if (t.isGoTask && goDate) {
+        const d = parseDate(goDate);
+        shifted.name = `🎉 GO（${d.getMonth()+1}/${d.getDate()} グランドオープン）`;
+        shifted.start = goDate;
+        shifted.end   = goDate;
+      }
+      return shifted;
+    });
+  } else {
+    newTasks = DEFAULT_TASKS.map(t => ({
+      ...t,
+      id: t.id + 10000,
+      comments: [],
+      status: 'todo',
+    }));
+  }
+  state.stores.push({ id: newId, name, goDate: goDate || '' });
+  state.tasks[newId] = newTasks;
+  saveStores();
+  // 新店舗のタスクも保存
+  state.currentStoreId = newId;
+  saveTasks();
+  state.currentStoreId = state.stores[state.stores.length - 2]?.id || 'store1'; // 元の店舗に戻す
+  document.getElementById('new-store-name').value = '';
+  document.getElementById('new-store-go').value = '';
+  renderStoreList();
+  showToast(`✅ ${name} を追加しました（GO日: ${goDate ? fmtDateFull(goDate) : '未設定'}）`);
+}
+
+// ===== GO日逆算ロジック =====
+
+// 基準GO日（元データのGO日）: 2026-04-16
+const BASE_GO_DATE = '2026-04-16';
+
+// 日付を YYYY-MM-DD 文字列に変換
+function toDateStr(d) {
+  const y = d.getFullYear();
+  const m = String(d.getMonth()+1).padStart(2,'0');
+  const day = String(d.getDate()).padStart(2,'0');
+  return `${y}-${m}-${day}`;
+}
+
+// GOタスク（isGoTask:true）の日付をGO日に同期する
+function syncGoTaskDate(goDateStr) {
+  if (!goDateStr) return;
+  const goTask = currentTasks().find(t => t.isGoTask);
+  if (!goTask) return;
+  // GO日タスクの名前も月/日形式で更新
+  const d = parseDate(goDateStr);
+  if (d) {
+    goTask.name = `🎉 GO（${d.getMonth()+1}/${d.getDate()} グランドオープン）`;
+    goTask.start = goDateStr;
+    goTask.end   = goDateStr;
+  }
+}
+
+// ヘッダーのGO日入力が変わったとき → 店舗のgoDateを更新 & GOタスク日付を同期
+function onHeaderGoDateChange() {
+  const val = document.getElementById('header-go-date').value;
+  const store = currentStore();
+  if (store && val) {
+    store.goDate = val;
+    syncGoTaskDate(val);   // ← GOタスクの日付を自動更新
+    saveTasks();           // ← タスクも保存
+    saveStores();
+    renderDashboard();
+    // タスク一覧が表示中なら再描画
+    if (!document.getElementById('view-tasks').classList.contains('hidden')) renderTasks();
+    if (!document.getElementById('view-gantt').classList.contains('hidden')) renderGantt();
+  }
+}
+
+// 逆算プレビューを開く
+function openRecalcPreview() {
+  const newGoStr = document.getElementById('header-go-date').value;
+  if (!newGoStr) { showToast('⚠️ まずGO日を入力してください'); return; }
+
+  const baseGo = parseDate(BASE_GO_DATE);
+  const newGo  = parseDate(newGoStr);
+  const diffMs = newGo - baseGo;
+  const diffDays = Math.round(diffMs / 86400000);
+
+  if (diffDays === 0) { showToast('ℹ️ GO日に変更はありません'); return; }
+
+  // 対象タスク: 完了済み以外 & 日付あり
+  const targets = currentTasks().filter(t => t.status !== 'done' && (t.start || t.end));
+
+  // プレビュー生成
+  const previews = targets.map(t => {
+    const newStart = t.start ? toDateStr(new Date(parseDate(t.start).getTime() + diffMs)) : '';
+    const newEnd   = t.end   ? toDateStr(new Date(parseDate(t.end).getTime()   + diffMs)) : '';
+    return { task: t, newStart, newEnd };
+  });
+
+  // info表示
+  const sign = diffDays > 0 ? `+${diffDays}` : `${diffDays}`;
+  document.getElementById('recalc-info').innerHTML =
+    `<strong>基準GO日:</strong> ${fmtDateFull(BASE_GO_DATE)} &nbsp;→&nbsp; <strong>新GO日:</strong> ${fmtDateFull(newGoStr)}
+     &nbsp;（<span style="color:var(--primary);font-weight:800;">${sign}日</span>シフト）
+     &nbsp;｜ 対象タスク: <strong>${previews.length}件</strong>`;
+
+  // リスト表示
+  const listEl = document.getElementById('recalc-preview-list');
+  if (previews.length === 0) {
+    listEl.innerHTML = '<div style="color:var(--text-muted);font-size:13px;padding:16px 0;">変更対象のタスクがありません（完了済みタスクは除外）</div>';
+  } else {
+    listEl.innerHTML = previews.map(p => `
+      <div class="recalc-row">
+        <div class="recalc-name">${p.task.name}</div>
+        <div class="recalc-old">${p.task.start ? fmtDate(p.task.start) : ''}${p.task.start && p.task.end ? '〜' : ''}${p.task.end ? fmtDate(p.task.end) : ''}</div>
+        <div class="recalc-arrow">→</div>
+        <div class="recalc-new">${p.newStart ? fmtDate(p.newStart) : ''}${p.newStart && p.newEnd ? '〜' : ''}${p.newEnd ? fmtDate(p.newEnd) : ''}</div>
+      </div>`).join('');
+  }
+
+  // 適用用にstateへ保存
+  state._recalcPreviews = previews;
+  state._recalcNewGoDate = newGoStr;
+
+  document.getElementById('recalc-modal').classList.add('open');
+}
+
+// 逆算を実際に適用
+function applyRecalc() {
+  const previews = state._recalcPreviews;
+  if (!previews || previews.length === 0) { closeModal('recalc-modal'); return; }
+
+  previews.forEach(p => {
+    const task = currentTasks().find(t => t.id === p.task.id);
+    if (!task) return;
+    if (p.newStart) task.start = p.newStart;
+    if (p.newEnd)   task.end   = p.newEnd;
+  });
+
+  // 店舗のGO日も更新
+  const store = currentStore();
+  if (store) {
+    store.goDate = state._recalcNewGoDate;
+    saveStores();
+  }
+
+  saveTasks();
+  closeModal('recalc-modal');
+  renderDashboard();
+  showToast(`✅ ${previews.length}件のタスクスケジュールを更新しました`);
+}
+
+// ===== 印刷機能 =====
+// 通常印刷：現在表示中のビューをそのまま印刷（iframe経由）
+function printView(view) {
+  // 対象ビューだけ表示して印刷
+  ['dashboard','tasks','gantt'].forEach(v => {
+    document.getElementById(`view-${v}`).classList.toggle('hidden', v !== view);
+  });
+  // 少し待ってから印刷（レンダリング待ち）
+  setTimeout(() => {
+    window.print();
+    // 印刷ダイアログ後に元のタブに戻す
+    setTimeout(() => {
+      ['dashboard','tasks','gantt'].forEach(v => {
+        const isActive = document.getElementById(`tab-${v}`)?.classList.contains('active');
+        document.getElementById(`view-${v}`).classList.toggle('hidden', !isActive);
+      });
+    }, 1000);
+  }, 100);
+}
+
+// Excel風印刷：別タブにHTMLを生成してダウンロード or 印刷
+function exportView(view) {
+  const store = currentStore();
+  const storeName = store?.name || '';
+  const goDate = store?.goDate ? fmtDateFull(store.goDate) : '未設定';
+  const now = new Date();
+  const printDate = `${now.getFullYear()}/${now.getMonth()+1}/${now.getDate()}`;
+
+  let content = '';
+
+  if (view === 'dashboard') {
+    // ダッシュボード：進捗サマリー表
+    const tasks = currentTasks();
+    const total = tasks.length;
+    const done = tasks.filter(t => getEffectiveStatus(t) === 'done').length;
+    const inprogress = tasks.filter(t => getEffectiveStatus(t) === 'inprogress').length;
+    const todo = tasks.filter(t => getEffectiveStatus(t) === 'todo').length;
+    const overdue = tasks.filter(t => getEffectiveStatus(t) === 'overdue').length;
+    const pct = total ? Math.round(done/total*100) : 0;
+
+    const phases = ['引渡しまでに行うこと','引渡し後に行うこと','GO後に行うこと'];
+    const phaseLabels = ['引渡し前','引渡し後','GO後'];
+
+    content = `
+      <h2 style="color:#0f4526; margin-bottom:16px;">📊 進捗サマリー</h2>
+      <table border="1" cellpadding="8" cellspacing="0" style="border-collapse:collapse; width:100%; margin-bottom:20px;">
+        <tr style="background:#0f4526; color:white;">
+          <th>総タスク</th><th>✅ 完了</th><th>🔵 進行中</th><th>⚪ 未着手</th><th>🔴 期限超過</th><th>進捗率</th>
+        </tr>
+        <tr style="text-align:center; font-size:18pt; font-weight:bold;">
+          <td>${total}</td><td style="color:#10b981">${done}</td><td style="color:#3b82f6">${inprogress}</td>
+          <td style="color:#6b7280">${todo}</td><td style="color:#ef4444">${overdue}</td><td style="color:#1a6b3c">${pct}%</td>
+        </tr>
+      </table>
+      <h3 style="color:#0f4526; margin-bottom:10px;">フェーズ別進捗</h3>
+      <table border="1" cellpadding="8" cellspacing="0" style="border-collapse:collapse; width:100%; margin-bottom:20px;">
+        <tr style="background:#0f4526; color:white;"><th>フェーズ</th><th>完了</th><th>総数</th><th>進捗率</th></tr>
+        ${phases.map((ph, i) => {
+          const pt = tasks.filter(t => t.phase === ph);
+          const pd = pt.filter(t => getEffectiveStatus(t) === 'done').length;
+          const pp = pt.length ? Math.round(pd/pt.length*100) : 0;
+          return `<tr><td>${phaseLabels[i]}</td><td style="text-align:center">${pd}</td><td style="text-align:center">${pt.length}</td><td style="text-align:center">${pp}%</td></tr>`;
+        }).join('')}
+      </table>`;
+
+  } else if (view === 'tasks') {
+    // タスク一覧：全タスクを表形式で出力
+    const phases = ['引渡しまでに行うこと','引渡し後に行うこと','GO後に行うこと'];
+    const phaseLabels = { '引渡しまでに行うこと':'引渡し前', '引渡し後に行うこと':'引渡し後', 'GO後に行うこと':'GO後' };
+    const statusMap = { todo:'未着手', inprogress:'進行中', done:'完了', overdue:'期限超過' };
+
+    content = `<h2 style="color:#0f4526; margin-bottom:16px;">✅ タスク一覧</h2>`;
+    phases.forEach(phase => {
+      const tasks = currentTasks().filter(t => t.phase === phase);
+      if (tasks.length === 0) return;
+      content += `
+        <h3 style="color:#0f4526; margin:16px 0 8px;">${phaseLabels[phase]}</h3>
+        <table border="1" cellpadding="6" cellspacing="0" style="border-collapse:collapse; width:100%; margin-bottom:16px; font-size:9pt;">
+          <tr style="background:#0f4526; color:white;">
+            <th style="width:30px;">No</th>
+            <th>タスク名</th><th>内容</th><th style="width:60px;">担当</th>
+            <th style="width:55px;">開始日</th><th style="width:55px;">完了予定</th><th style="width:60px;">ステータス</th>
+          </tr>
+          ${tasks.map((t, i) => {
+            const s = getEffectiveStatus(t);
+            const bg = s === 'done' ? '#f0fdf4' : s === 'overdue' ? '#fef2f2' : s === 'inprogress' ? '#eff6ff' : '';
+            return `<tr style="background:${bg}">
+              <td style="text-align:center">${i+1}</td>
+              <td><strong>${t.name}</strong></td>
+              <td style="font-size:8pt; color:#555">${t.desc || ''}</td>
+              <td style="text-align:center">${t.assignee || '—'}</td>
+              <td style="text-align:center">${fmtDate(t.start)}</td>
+              <td style="text-align:center">${fmtDate(t.end)}</td>
+              <td style="text-align:center">${statusMap[s] || s}</td>
+            </tr>`;
+          }).join('')}
+        </table>`;
+    });
+
+  } else if (view === 'gantt') {
+    // ガントチャート：タスク＋日付バー表形式
+    const tasks = currentTasks().filter(t => t.start && t.end);
+    if (tasks.length === 0) { showToast('⚠️ 表示できるタスクがありません'); return; }
+
+    const allDates = tasks.flatMap(t => [parseDate(t.start), parseDate(t.end)]).filter(Boolean);
+    let minDate = new Date(Math.min(...allDates));
+    let maxDate = new Date(Math.max(...allDates));
+    minDate.setDate(minDate.getDate() - 1);
+    maxDate.setDate(maxDate.getDate() + 3);
+
+    const dates = [];
+    let d = new Date(minDate);
+    while (d <= maxDate) { dates.push(new Date(d)); d.setDate(d.getDate()+1); }
+
+    const statusMap = { todo:'未着手', inprogress:'進行中', done:'完了', overdue:'期限超過' };
+    const phaseLabels = { '引渡しまでに行うこと':'引渡し前', '引渡し後に行うこと':'引渡し後', 'GO後に行うこと':'GO後' };
+
+    content = `
+      <h2 style="color:#0f4526; margin-bottom:16px;">📅 ガントチャート</h2>
+      <table border="1" cellpadding="3" cellspacing="0" style="border-collapse:collapse; font-size:7pt; width:100%;">
+        <thead>
+          <tr style="background:#0f4526; color:white;">
+            <th style="min-width:120px; text-align:left; padding:4px 6px;">タスク名</th>
+            <th style="width:40px;">担当</th>
+            <th style="width:45px;">ステータス</th>
+            ${dates.map(d => {
+              const isWeekend = d.getDay()===0||d.getDay()===6;
+              const bg = isWeekend ? 'background:#2a5a3a;' : '';
+              return `<th style="width:18px; text-align:center; ${bg}">${d.getDate()}<br><span style="font-size:6pt">${['日','月','火','水','木','金','土'][d.getDay()]}</span></th>`;
+            }).join('')}
+          </tr>
+        </thead>
+        <tbody>
+          ${tasks.map(t => {
+            const s = getEffectiveStatus(t);
+            const barColor = s==='done'?'#10b981':s==='inprogress'?'#3b82f6':s==='overdue'?'#ef4444':'#1a6b3c';
+            return `<tr>
+              <td style="padding:3px 6px; font-weight:600;">${t.name}<br><span style="font-size:6pt; color:#888">${phaseLabels[t.phase]||''}</span></td>
+              <td style="text-align:center">${t.assignee||'—'}</td>
+              <td style="text-align:center; font-size:6pt">${statusMap[s]||s}</td>
+              ${dates.map(d => {
+                const inRange = d >= parseDate(t.start) && d <= parseDate(t.end);
+                const isWeekend = d.getDay()===0||d.getDay()===6;
+                const bg = inRange ? barColor : isWeekend ? '#f5f5f5' : 'white';
+                return `<td style="background:${bg}; text-align:center;">${inRange?'■':''}</td>`;
+              }).join('')}
+            </tr>`;
+          }).join('')}
+        </tbody>
+      </table>`;
+  }
+
+  // 新しいウィンドウで印刷
+  const win = window.open('', '_blank', 'width=1200,height=800');
+  win.document.write(`<!DOCTYPE html><html lang="ja"><head>
+    <meta charset="UTF-8">
+    <title>Gong cha 新店出店 - ${storeName}</title>
+    <style>
+      body { font-family: 'Yu Gothic', 'Hiragino Sans', sans-serif; padding: 20px; color: #1a1a2e; }
+      h1 { color: #0f4526; border-bottom: 3px solid #1a6b3c; padding-bottom: 8px; margin-bottom: 4px; }
+      .meta { font-size: 11pt; color: #666; margin-bottom: 20px; }
+      table { page-break-inside: auto; }
+      tr { page-break-inside: avoid; }
+      @media print {
+        body { padding: 10px; }
+        @page { margin: 10mm; size: A4 landscape; }
+      }
+    </style>
+  </head><body>
+    <h1>🍵 Gong cha 新店出店 タスク管理</h1>
+    <div class="meta">店舗：${storeName} ｜ GO日：${goDate} ｜ 出力日：${printDate}</div>
+    ${content}
+    <script>window.onload = () => { window.print(); }<\/script>
+  </body></html>`);
+  win.document.close();
+}
+
+// ===== FIREBASE INIT & REALTIME SYNC =====
+function initFirebase() {
+  if (!FB_CONFIGURED) {
+    // Firebase未設定 → localStorageモードで起動
+    console.warn('⚠️ Firebase未設定。localStorageモードで動作します。');
+    const savedStores = localStorage.getItem('gc_stores');
+    if (savedStores) state.stores = JSON.parse(savedStores);
+    state.currentStoreId = localStorage.getItem('gc_currentStore') || 'store1';
+    state.stores.forEach(s => {
+      const saved = localStorage.getItem(`gc_tasks_${s.id}`);
+      state.tasks[s.id] = saved ? JSON.parse(saved) : DEFAULT_TASKS.map(t => ({...t, comments:[]}));
+    });
+    bootApp();
+    return;
+  }
+
+  // Firebase SDK が module で読み込まれるのを待つ
+  const waitFb = setInterval(() => {
+    if (!window._fbReady) return;
+    clearInterval(waitFb);
+    const { initializeApp, getDatabase, ref, set, onValue } = window._fbReady;
+    state.fbFns = window._fbReady;
+
+    const app = initializeApp(FIREBASE_CONFIG);
+    state.db = getDatabase(app);
+
+    // 🔄 storesMeta をリアルタイム監視
+    onValue(ref(state.db, 'storesMeta'), snap => {
+      const data = snap.val();
+      if (data) {
+        state.stores = Object.entries(data).map(([id, v]) => ({ id, name: v.name, goDate: v.goDate || '' }));
+      } else {
+        // 初回：デフォルトデータを書き込む
+        const storesObj = Object.fromEntries(DEFAULT_STORES.map(s => [s.id, { name: s.name, goDate: s.goDate }]));
+        set(ref(state.db, 'storesMeta'), storesObj);
+        state.stores = [...DEFAULT_STORES];
+      }
+      // 現在の店舗のタスクをリッスン
+      subscribeCurrentStore();
+      updateStoreUI();
+    });
+  }, 100);
+}
+
+function subscribeCurrentStore() {
+  if (!state.db || !state.fbFns) return;
+  const { ref, onValue, set } = state.fbFns;
+
+  // 既存リスナー解除
+  state._fbListeners.forEach(unsub => unsub && unsub());
+  state._fbListeners = [];
+
+  const storeId = state.currentStoreId;
+  const unsub = onValue(ref(state.db, `stores/${storeId}/tasks`), snap => {
+    const data = snap.val();
+    if (data) {
+      // Firebase objectをarrayに変換、commentsもarrayに戻す
+      state.tasks[storeId] = Object.values(data).map(t => ({
+        ...t,
+        id: typeof t.id === 'string' ? parseInt(t.id) || t.id : t.id,
+        comments: t.comments
+          ? (Array.isArray(t.comments) ? t.comments : Object.values(t.comments))
+          : []
+      }));
+      // nextId更新
+      const maxId = Math.max(...state.tasks[storeId].map(t => typeof t.id === 'number' ? t.id : 0), 100);
+      state.nextId = maxId;
+    } else {
+      // 初回：デフォルトタスクを書き込む
+      const tasks = DEFAULT_TASKS.map(t => ({ ...t, comments: {} }));
+      const tasksObj = Object.fromEntries(tasks.map(t => [String(t.id), t]));
+      set(ref(state.db, `stores/${storeId}/tasks`), tasksObj);
+      state.tasks[storeId] = DEFAULT_TASKS.map(t => ({ ...t, comments: [] }));
+    }
+    // 現在のタブを再描画
+    const activeTab = document.querySelector('.tab.active')?.id?.replace('tab-', '') || 'dashboard';
+    if (activeTab === 'dashboard') renderDashboard();
+    else if (activeTab === 'tasks') renderTasks();
+    else if (activeTab === 'gantt') renderGantt();
+    // 同期インジケーター
+    showSyncBadge();
+  });
+  state._fbListeners.push(unsub);
+}
+
+function updateStoreUI() {
+  const store = currentStore();
+  if (!store) return;
+  document.getElementById('currentStoreName').textContent = store.name;
+  const goInput = document.getElementById('header-go-date');
+  if (goInput && store.goDate) goInput.value = store.goDate;
+}
+
+// 同期バッジ（右上に一瞬表示）
+function showSyncBadge() {
+  let badge = document.getElementById('sync-badge');
+  if (!badge) {
+    badge = document.createElement('div');
+    badge.id = 'sync-badge';
+    badge.style.cssText = 'position:fixed;top:68px;right:16px;background:#10b981;color:white;padding:4px 12px;border-radius:20px;font-size:11px;font-weight:700;z-index:999;opacity:0;transition:opacity 0.3s;';
+    badge.textContent = '🔄 同期完了';
+    document.body.appendChild(badge);
+  }
+  badge.style.opacity = '1';
+  setTimeout(() => { badge.style.opacity = '0'; }, 1500);
+}
+
+function bootApp() {
+  updateStoreUI();
+  renderDashboard();
+  document.querySelectorAll('.modal-overlay').forEach(el => {
+    el.addEventListener('click', e => { if (e.target === el) el.classList.remove('open'); });
+  });
+  // Firebase未設定の場合は警告バナーを表示
+  if (!FB_CONFIGURED) {
+    const banner = document.createElement('div');
+    banner.style.cssText = 'background:#f5a623;color:#333;text-align:center;padding:8px;font-size:12px;font-weight:700;';
+    banner.innerHTML = '⚠️ Firebase未設定のため <strong>ローカル保存モード</strong> で動作中。リアルタイム同期は無効です。<a href="#" onclick="document.getElementById(\'fb-setup-modal\').classList.add(\'open\');return false;" style="color:#0f4526;margin-left:8px;">設定方法を見る</a>';
+    document.querySelector('.tabs').insertAdjacentElement('afterend', banner);
+  }
+}
+
+// Firebase設定ガイドモーダル（HTML追加）
+document.body.insertAdjacentHTML('beforeend', `
+<div class="modal-overlay" id="fb-setup-modal">
+  <div class="modal" style="max-width:560px;">
+    <div class="modal-header">
+      <div class="modal-title">🔥 Firebase設定ガイド</div>
+      <button class="modal-close" onclick="closeModal('fb-setup-modal')">×</button>
+    </div>
+    <div style="font-size:13px; line-height:1.8;">
+      <p style="margin-bottom:12px;">以下の手順でFirebaseを設定すると、<strong>複数人でリアルタイム同期</strong>できます。</p>
+      <ol style="padding-left:20px; margin-bottom:16px;">
+        <li><a href="https://console.firebase.google.com/" target="_blank" style="color:var(--primary);">Firebase Console</a> にアクセス（Googleアカウントでログイン）</li>
+        <li>「プロジェクトを追加」→ プロジェクト名を入力して作成</li>
+        <li>左メニュー「Realtime Database」→「データベースを作成」→ テストモードで開始</li>
+        <li>「プロジェクトの設定」→「マイアプリ」→「&lt;/&gt; ウェブ」でアプリ登録</li>
+        <li>表示された <code>firebaseConfig</code> の値をこのHTMLファイルの <code>FIREBASE_CONFIG</code> に貼り付け</li>
+        <li>HTMLファイルを保存して開き直す</li>
+      </ol>
+      <div style="background:var(--accent2); border-radius:8px; padding:12px; font-size:12px;">
+        💡 <strong>無料枠で十分：</strong> Firebase Spark（無料）プランで最大100同時接続・1GB保存が使えます。
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-primary" onclick="closeModal('fb-setup-modal')">閉じる</button>
+    </div>
+  </div>
+</div>`);
+
+// ===== INIT =====
+initFirebase();
+</script>
+</body>
+</html>
